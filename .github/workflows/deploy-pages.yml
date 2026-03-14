@@ -1,4 +1,4 @@
-﻿name: Deploy Bioinformatics Dashboard
+name: Deploy Plot Showcase
 
 on:
   push:

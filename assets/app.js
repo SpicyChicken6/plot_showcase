@@ -1,679 +1,547 @@
-﻿const DATA_PATHS = {
-  jobs: "./output/bioinformatics-jobs-board.csv",
-  history: "./output/bioinformatics-trend-history.csv",
-};
+import { figureCatalog, siteMeta } from "./figures.js";
 
-const METRIC_LABELS = {
-  total_roles: "Total live roles",
-  unique_companies: "Unique companies",
-  computational_biologist_roles: "Computational biologist roles",
-  bioinformatics_scientist_roles: "Bioinformatics scientist roles",
-  bioinformatics_engineer_roles: "Bioinformatics engineer roles",
-  bioinformatics_analyst_roles: "Bioinformatics analyst roles",
-  python_roles: "Python roles",
-  pipelines_roles: "Pipeline roles",
-  ngs_genomics_roles: "NGS / genomics roles",
-  r_roles: "R roles",
-  statistics_roles: "Statistics roles",
-  cancer_biomarker_roles: "Cancer / biomarker roles",
-  cloud_roles: "Cloud roles",
-  ml_ai_roles: "ML / AI roles",
-  single_cell_multiomics_roles: "Single-cell / multi-omics roles",
-  workflow_engine_roles: "Workflow-engine roles",
-  cross_functional_collaboration_roles: "Cross-functional roles",
-};
-
-const TECHNICAL_PRIORITY = [
-  "Pipelines / workflow orchestration",
-  "Python",
-  "NGS / genomics",
-  "Statistics / modeling",
-  "Cloud / scalable compute",
-  "Machine learning / AI",
+const analysisFilters = [
+  "All analyses",
+  ...new Set(figureCatalog.map((figure) => figure.analysisType)),
 ];
 
 const state = {
-  jobs: [],
-  history: [],
-  summary: null,
   searchTerm: "",
-  roleFilter: "",
-  modeFilter: "",
-  skillFilter: "",
-  historyMetric: "total_roles",
+  analysisFilter: "All analyses",
+  selectedId: figureCatalog[0]?.id ?? null,
 };
 
+let inspectorLoadId = 0;
+
 const elements = {
-  heroCopy: document.querySelector("#heroCopy"),
+  heroText: document.querySelector("#heroText"),
   heroStats: document.querySelector("#heroStats"),
-  trendMeta: document.querySelector("#trendMeta"),
-  skillIndex: document.querySelector("#skillIndex"),
-  historyMetric: document.querySelector("#historyMetric"),
-  historyChart: document.querySelector("#historyChart"),
-  historySummary: document.querySelector("#historySummary"),
-  roleMix: document.querySelector("#roleMix"),
-  modeMix: document.querySelector("#modeMix"),
-  insightCards: document.querySelector("#insightCards"),
-  jobsMeta: document.querySelector("#jobsMeta"),
   searchInput: document.querySelector("#searchInput"),
-  roleFilter: document.querySelector("#roleFilter"),
-  modeFilter: document.querySelector("#modeFilter"),
-  skillFilter: document.querySelector("#skillFilter"),
-  jobGrid: document.querySelector("#jobGrid"),
+  analysisChips: document.querySelector("#analysisChips"),
+  figureGrid: document.querySelector("#figureGrid"),
+  inspector: document.querySelector("#inspector"),
+  authoringGuide: document.querySelector("#authoringGuide"),
 };
 
 init();
 
-async function init() {
+function init() {
+  renderHero();
+  renderAnalysisChips();
+  renderAuthoringGuide();
   attachEvents();
-  renderLoadingState();
-
-  try {
-    const [jobsRows, historyRows] = await Promise.all([
-      loadCsv(DATA_PATHS.jobs),
-      loadCsv(DATA_PATHS.history),
-    ]);
-
-    state.jobs = jobsRows.map(normalizeJob).filter(Boolean);
-    state.history = historyRows.map(normalizeHistory).filter(Boolean);
-    state.summary = computeSummary(state.jobs, state.history);
-
-    populateFilters();
-    populateHistoryMetricSelector();
-    renderPage();
-  } catch (error) {
-    renderErrorState(error instanceof Error ? error.message : String(error));
-  }
+  renderPage();
 }
 
 function attachEvents() {
   elements.searchInput.addEventListener("input", (event) => {
     state.searchTerm = event.target.value.trim().toLowerCase();
-    renderJobs();
+    renderPage();
   });
 
-  elements.roleFilter.addEventListener("change", (event) => {
-    state.roleFilter = event.target.value;
-    renderJobs();
+  elements.analysisChips.addEventListener("click", (event) => {
+    const chip = event.target.closest("[data-analysis-filter]");
+    if (!chip) {
+      return;
+    }
+
+    state.analysisFilter = chip.dataset.analysisFilter;
+    renderPage();
   });
 
-  elements.modeFilter.addEventListener("change", (event) => {
-    state.modeFilter = event.target.value;
-    renderJobs();
+  elements.figureGrid.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-figure-id]");
+    if (!card) {
+      return;
+    }
+
+    state.selectedId = card.dataset.figureId;
+    renderPage();
   });
 
-  elements.skillFilter.addEventListener("change", (event) => {
-    state.skillFilter = event.target.value;
-    renderJobs();
+  elements.figureGrid.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    const card = event.target.closest("[data-figure-id]");
+    if (!card) {
+      return;
+    }
+
+    event.preventDefault();
+    state.selectedId = card.dataset.figureId;
+    renderPage();
   });
-
-  elements.historyMetric.addEventListener("change", (event) => {
-    state.historyMetric = event.target.value;
-    renderHistory();
-  });
-}
-
-function renderLoadingState() {
-  elements.heroCopy.innerHTML = `
-    <p class="section-kicker">Bioinformatics hiring monitor</p>
-    <h1>Loading trend index</h1>
-    <p class="hero-subtitle">Reading the latest board snapshot and weekly history.</p>
-    <p class="hero-intro">This dashboard is static, but the data it reads is refreshed from the files in <code class="code-like">bioinformatics-board/output</code>.</p>
-  `;
-
-  elements.heroStats.innerHTML = Array.from({ length: 4 }, () => `
-    <article class="stat-card">
-      <span class="stat-value">--</span>
-      <span class="stat-label">Loading</span>
-    </article>
-  `).join("");
-
-  elements.skillIndex.innerHTML = createEmptyState("Loading trend index", "Fetching the current skill distribution.");
-  elements.historyChart.innerHTML = createEmptyState("Loading history", "Reading the weekly trend-history file.");
-  elements.roleMix.innerHTML = createEmptyState("Loading role mix", "Computing role-family counts.");
-  elements.modeMix.innerHTML = createEmptyState("Loading work modes", "Computing on-site, hybrid, and remote mix.");
-  elements.insightCards.innerHTML = createEmptyState("Loading insights", "Generating headline observations.");
-  elements.jobGrid.innerHTML = createEmptyState("Loading jobs", "Reading the live-board CSV.");
-}
-
-function renderErrorState(message) {
-  const html = createEmptyState("Dashboard could not load", message);
-  elements.skillIndex.innerHTML = html;
-  elements.historyChart.innerHTML = html;
-  elements.roleMix.innerHTML = html;
-  elements.modeMix.innerHTML = html;
-  elements.insightCards.innerHTML = html;
-  elements.jobGrid.innerHTML = html;
 }
 
 function renderPage() {
-  renderHero();
-  renderSkillIndex();
-  renderHistory();
-  renderMixPanels();
-  renderInsights();
-  renderJobs();
-}
-
-async function loadCsv(path) {
-  const response = await fetch(path, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`Failed to load ${path}: ${response.status}`);
-  }
-
-  const rawText = await response.text();
-  if (!window.Papa) {
-    throw new Error("PapaParse is unavailable.");
-  }
-
-  const parsed = window.Papa.parse(rawText, {
-    header: true,
-    skipEmptyLines: true,
-  });
-
-  if (parsed.errors.length) {
-    throw new Error(parsed.errors[0].message);
-  }
-
-  return parsed.data;
-}
-
-function normalizeJob(row) {
-  if (!row || !row.Company || !row.Title) {
-    return null;
-  }
-
-  return {
-    company: row.Company.trim(),
-    title: row.Title.trim(),
-    roleFamily: row.RoleFamily.trim(),
-    focusArea: row.FocusArea.trim(),
-    location: row.Location.trim(),
-    workMode: row.WorkMode.trim(),
-    responsibilities: splitList(row.Responsibilities),
-    requirements: splitList(row.Requirements),
-    skillTags: splitList(row.KeySkills),
-    sourceUrl: row.SourceUrl.trim(),
-  };
-}
-
-function normalizeHistory(row) {
-  if (!row || !row.snapshot_date) {
-    return null;
-  }
-
-  const normalized = { snapshot_date: row.snapshot_date.trim() };
-  Object.keys(row).forEach((key) => {
-    if (key === "snapshot_date") {
-      return;
-    }
-
-    const value = Number(row[key]);
-    normalized[key] = Number.isFinite(value) ? value : 0;
-  });
-
-  return normalized;
-}
-
-function splitList(value) {
-  return String(value || "")
-    .split(";")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function computeSummary(jobs, history) {
-  const totalRoles = jobs.length;
-  const uniqueCompanies = new Set(jobs.map((job) => job.company)).size;
-  const roleMix = countBy(jobs, "roleFamily");
-  const modeMix = countBy(jobs, "workMode");
-  const focusMix = countBy(jobs, "focusArea");
-  const skillIndex = countNested(jobs, "skillTags");
-  const latestHistory = history[history.length - 1] || null;
-
-  const oncologyCount = getCount(skillIndex, "Cancer / liquid biopsy / biomarkers");
-  const singleCellCount = getCount(skillIndex, "Single-cell / multi-omics");
-  const cloudCount = getCount(skillIndex, "Cloud / scalable compute");
-  const mlCount = getCount(skillIndex, "Machine learning / AI");
-  const workflowCount = getCount(skillIndex, "Workflow engines (Nextflow / WDL / Snakemake)");
-  const pipelinesCount = getCount(skillIndex, "Pipelines / workflow orchestration");
-  const pythonCount = getCount(skillIndex, "Python");
-  const remoteCount = getCount(modeMix, "Remote");
-  const hybridCount = getCount(modeMix, "Hybrid");
-  const onsiteCount = getCount(modeMix, "On-site");
-
-  const leadingTechnicalSkill = TECHNICAL_PRIORITY.map((label) => skillIndex.find((entry) => entry.label === label)).find(Boolean) || skillIndex[0] || null;
-
-  return {
-    totalRoles,
-    uniqueCompanies,
-    roleMix,
-    modeMix,
-    focusMix,
-    skillIndex,
-    history,
-    latestHistory,
-    latestSnapshotDate: latestHistory?.snapshot_date || null,
-    leadingTechnicalSkill,
-    oncologyCount,
-    singleCellCount,
-    cloudCount,
-    mlCount,
-    workflowCount,
-    pipelinesCount,
-    pythonCount,
-    remoteCount,
-    hybridCount,
-    onsiteCount,
-  };
-}
-
-function countBy(items, key) {
-  const counts = new Map();
-  items.forEach((item) => {
-    const value = item[key];
-    if (!value) {
-      return;
-    }
-    counts.set(value, (counts.get(value) || 0) + 1);
-  });
-
-  return [...counts.entries()]
-    .map(([label, count]) => ({ label, count, share: roundShare(count, items.length) }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-}
-
-function countNested(items, key) {
-  const counts = new Map();
-  items.forEach((item) => {
-    (item[key] || []).forEach((value) => {
-      counts.set(value, (counts.get(value) || 0) + 1);
-    });
-  });
-
-  return [...counts.entries()]
-    .map(([label, count]) => ({ label, count, share: roundShare(count, items.length) }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-}
-
-function roundShare(count, total) {
-  if (!total) {
-    return 0;
-  }
-  return Number(((count / total) * 100).toFixed(1));
-}
-
-function getCount(entries, label) {
-  return entries.find((entry) => entry.label === label)?.count || 0;
+  const filteredFigures = getFilteredFigures();
+  ensureSelection(filteredFigures);
+  renderHeroStats(filteredFigures.length);
+  renderAnalysisChips();
+  renderFigureGrid(filteredFigures);
+  renderInspector();
 }
 
 function renderHero() {
-  const { totalRoles, uniqueCompanies, latestSnapshotDate, leadingTechnicalSkill, oncologyCount, onsiteCount, hybridCount, remoteCount } = state.summary;
-  const formattedDate = latestSnapshotDate ? formatDate(latestSnapshotDate) : "No snapshot date";
-  const footprintShare = roundShare(onsiteCount + hybridCount, totalRoles);
-  const oncologyShare = roundShare(oncologyCount, totalRoles);
-
-  elements.heroCopy.innerHTML = `
-    <p class="section-kicker">Bioinformatics hiring monitor</p>
-    <h1>Trend index for live bioinformatics roles</h1>
-    <p class="hero-subtitle">A static dashboard fed by the weekly board snapshot and history files.</p>
-    <p class="hero-intro">This page reads <code class="code-like">bioinformatics-jobs-board.csv</code> and <code class="code-like">bioinformatics-trend-history.csv</code> directly from the <code class="code-like">output</code> folder. Refresh the data files and the dashboard updates automatically.</p>
+  elements.heroText.innerHTML = `
+    <p class="section-kicker">Showcase Site</p>
+    <h1>${escapeHtml(siteMeta.title)}</h1>
+    <p class="hero-subtitle">${escapeHtml(siteMeta.subtitle)}</p>
+    <p class="hero-intro">${escapeHtml(siteMeta.intro)}</p>
     <div class="callout-row">
-      <span class="callout-pill">Last snapshot: ${escapeHtml(formattedDate)}</span>
-      <span class="callout-pill">Tracked families: 4</span>
-      <span class="callout-pill">Weekly baseline stored in trend history</span>
-    </div>
-    <div class="meta-row">
-      <a class="resource-link" href="./output/bioinformatics-jobs-board.csv">Open jobs CSV</a>
-      <a class="resource-link" href="./output/bioinformatics-skill-trends.md">Open trend summary</a>
-      <a class="resource-link" href="./automation/weekly-refresh-playbook.md">Open refresh playbook</a>
-    </div>
-  `;
-
-  elements.heroStats.innerHTML = `
-    <article class="stat-card">
-      <span class="stat-value">${totalRoles}</span>
-      <span class="stat-label">Live roles in the current board</span>
-    </article>
-    <article class="stat-card">
-      <span class="stat-value">${uniqueCompanies}</span>
-      <span class="stat-label">Unique companies in the sample</span>
-    </article>
-    <article class="stat-card">
-      <span class="stat-value">${leadingTechnicalSkill ? `${leadingTechnicalSkill.count}/${totalRoles}` : "--"}</span>
-      <span class="stat-label">Top technical signal: ${escapeHtml(leadingTechnicalSkill?.label || "Unavailable")}</span>
-    </article>
-    <article class="stat-card">
-      <span class="stat-value">${oncologyShare}%</span>
-      <span class="stat-label">Cancer-linked roles; ${footprintShare}% are on-site or hybrid and ${remoteCount}/${totalRoles} are remote</span>
-    </article>
-  `;
-}
-
-function renderSkillIndex() {
-  const { skillIndex, totalRoles } = state.summary;
-  elements.trendMeta.textContent = `${skillIndex.length} normalized skills tracked across ${totalRoles} live roles`;
-
-  elements.skillIndex.innerHTML = skillIndex
-    .slice(0, 14)
-    .map((entry) => `
-      <article class="skill-row">
-        <div class="skill-copy">
-          <strong>${escapeHtml(entry.label)}</strong>
-          <span>${entry.count} of ${totalRoles} roles</span>
-        </div>
-        <div class="meter" aria-hidden="true"><span style="width:${entry.share}%"></span></div>
-        <strong>${entry.share}%</strong>
-      </article>
-    `)
-    .join("");
-}
-
-function populateHistoryMetricSelector() {
-  const availableMetrics = state.history.length ? Object.keys(state.history[0]).filter((key) => key !== "snapshot_date") : Object.keys(METRIC_LABELS);
-  elements.historyMetric.innerHTML = availableMetrics
-    .map((metricKey) => `<option value="${escapeHtml(metricKey)}">${escapeHtml(METRIC_LABELS[metricKey] || humanizeMetric(metricKey))}</option>`)
-    .join("");
-
-  if (!availableMetrics.includes(state.historyMetric)) {
-    state.historyMetric = availableMetrics[0] || "total_roles";
-  }
-  elements.historyMetric.value = state.historyMetric;
-}
-
-function renderHistory() {
-  const { history } = state.summary;
-  const metricKey = state.historyMetric;
-  const metricLabel = METRIC_LABELS[metricKey] || humanizeMetric(metricKey);
-
-  if (!history.length) {
-    elements.historyChart.innerHTML = createEmptyState("No history yet", "Run the weekly refresh to seed the longitudinal chart.");
-    elements.historySummary.innerHTML = "";
-    return;
-  }
-
-  const points = history.map((row) => ({ date: row.snapshot_date, value: Number(row[metricKey] || 0) }));
-  elements.historyChart.innerHTML = createHistoryChart(points, metricLabel);
-  elements.historySummary.innerHTML = createHistorySummary(points, metricLabel);
-}
-
-function createHistoryChart(points, label) {
-  const width = 620;
-  const height = 220;
-  const left = 28;
-  const right = 18;
-  const top = 18;
-  const bottom = 36;
-  const innerWidth = width - left - right;
-  const innerHeight = height - top - bottom;
-  const maxValue = Math.max(...points.map((point) => point.value), 1);
-  const chartPoints = points.map((point, index) => {
-    const x = points.length === 1 ? left + innerWidth / 2 : left + (index * innerWidth) / (points.length - 1);
-    const y = top + innerHeight - (point.value / maxValue) * innerHeight;
-    return { ...point, x, y };
-  });
-
-  const polyline = chartPoints.map((point) => `${point.x},${point.y}`).join(" ");
-  const yTicks = Array.from({ length: 4 }, (_, index) => {
-    const tickValue = Math.round((maxValue * index) / 3);
-    const y = top + innerHeight - (tickValue / maxValue) * innerHeight;
-    return { tickValue, y };
-  });
-
-  return `
-    <div class="chart-wrap">
-      <div class="chart-legend">
-        <strong>${escapeHtml(label)}</strong>
-        <span>${points.length > 1 ? `${points.length} weekly snapshots` : "One snapshot so far"}</span>
-      </div>
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)} over time">
-        ${yTicks
-          .map(
-            (tick) => `
-              <line x1="${left}" y1="${tick.y}" x2="${width - right}" y2="${tick.y}" stroke="rgba(18,45,53,0.09)" stroke-width="1" />
-              <text x="${left - 8}" y="${tick.y + 4}" text-anchor="end" fill="#596d73" font-size="11" font-family="IBM Plex Mono">${tick.tickValue}</text>
-            `,
-          )
-          .join("")}
-        <line x1="${left}" y1="${top + innerHeight}" x2="${width - right}" y2="${top + innerHeight}" stroke="rgba(18,45,53,0.18)" stroke-width="1.5" />
-        ${chartPoints.length > 1 ? `<polyline fill="none" stroke="#0d7d72" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${polyline}" />` : ""}
-        ${chartPoints
-          .map(
-            (point) => `
-              <circle cx="${point.x}" cy="${point.y}" r="5.5" fill="#cf7440" stroke="white" stroke-width="2" />
-              <text x="${point.x}" y="${height - 12}" text-anchor="middle" fill="#596d73" font-size="11" font-family="IBM Plex Mono">${escapeHtml(shortDate(point.date))}</text>
-            `,
-          )
-          .join("")}
-      </svg>
-      <p class="chart-caption">${points.length > 1 ? "The line tracks how this metric moves as weekly snapshots accumulate." : "A second weekly run will turn this baseline point into a trend line."}</p>
+      ${siteMeta.callouts
+        .map((callout) => `<span class="callout-pill">${escapeHtml(callout)}</span>`)
+        .join("")}
     </div>
   `;
 }
 
-function createHistorySummary(points, label) {
-  const latest = points[points.length - 1];
-  const prior = points.length > 1 ? points[points.length - 2] : null;
-  const baseline = points[0];
-  const delta = prior ? latest.value - prior.value : 0;
-  const baselineDelta = latest.value - baseline.value;
+function renderHeroStats(visibleCount) {
+  const totalFigures = figureCatalog.length;
+  const analysisCount = new Set(
+    figureCatalog.map((figure) => figure.analysisType),
+  ).size;
+  const omicsCount = new Set(figureCatalog.map((figure) => figure.omicsDomain)).size;
 
-  return `
-    <article class="metric-card">
-      <h3>${escapeHtml(label)}</h3>
-      <strong>${latest.value}</strong>
-      <small>Latest snapshot on ${escapeHtml(formatDate(latest.date))}</small>
-    </article>
-    <article class="metric-card">
-      <h3>Week-over-week</h3>
-      <strong>${prior ? formatDelta(delta) : "Baseline"}</strong>
-      <small>${prior ? `Compared with ${formatDate(prior.date)}` : "Run another weekly refresh to compute delta."}</small>
-    </article>
-    <article class="metric-card">
-      <h3>Baseline delta</h3>
-      <strong>${points.length > 1 ? formatDelta(baselineDelta) : "0"}</strong>
-      <small>Relative to ${formatDate(baseline.date)}</small>
-    </article>
-  `;
-}
-
-function renderMixPanels() {
-  renderBarStack(elements.roleMix, state.summary.roleMix, state.summary.totalRoles);
-  renderBarStack(elements.modeMix, state.summary.modeMix, state.summary.totalRoles);
-}
-
-function renderBarStack(mount, entries, totalRoles) {
-  mount.innerHTML = entries
-    .map((entry) => `
-      <article class="mix-row">
-        <div class="mix-copy">
-          <strong>${escapeHtml(entry.label)}</strong>
-          <span>${entry.count} of ${totalRoles} roles</span>
-        </div>
-        <div class="mini-meter" aria-hidden="true"><span style="width:${entry.share}%"></span></div>
-        <strong>${entry.share}%</strong>
-      </article>
-    `)
-    .join("");
-}
-
-function renderInsights() {
-  const { totalRoles, pythonCount, pipelinesCount, oncologyCount, cloudCount, mlCount, workflowCount, singleCellCount, remoteCount, hybridCount, onsiteCount } = state.summary;
-  const insights = [
-    {
-      title: "Baseline stack",
-      body: `Python appears in ${pythonCount}/${totalRoles} roles and pipeline work appears in ${pipelinesCount}/${totalRoles}. That is the clearest common denominator across the board.`
-    },
-    {
-      title: "Commercial concentration",
-      body: `${oncologyCount}/${totalRoles} roles are linked to oncology, liquid biopsy, or biomarker programs. The current market sample is commercially cancer-heavy.`
-    },
-    {
-      title: "Execution requirements",
-      body: `Cloud shows up in ${cloudCount}/${totalRoles} roles, ML in ${mlCount}/${totalRoles}, and explicit workflow engines in ${workflowCount}/${totalRoles}. The bar is not just analysis; it is delivery.`
-    },
-    {
-      title: "Work footprint",
-      body: `${onsiteCount + hybridCount}/${totalRoles} roles are on-site or hybrid, while ${remoteCount}/${totalRoles} are remote. Location flexibility is the exception in this sample.`
-    },
-    {
-      title: "Research frontier",
-      body: `${singleCellCount}/${totalRoles} roles explicitly ask for single-cell or multi-omics depth. It is still a differentiator, but not yet the universal baseline.`
-    },
+  const statCards = [
+    { label: "Total figures", value: String(totalFigures).padStart(2, "0") },
+    { label: "Analysis groups", value: String(analysisCount).padStart(2, "0") },
+    { label: "Omics domains", value: String(omicsCount).padStart(2, "0") },
+    { label: "Visible now", value: String(visibleCount).padStart(2, "0") },
   ];
 
-  elements.insightCards.innerHTML = insights
+  elements.heroStats.innerHTML = statCards
     .map(
-      (insight) => `
-        <article class="insight-card">
-          <h3>${escapeHtml(insight.title)}</h3>
-          <p>${escapeHtml(insight.body)}</p>
+      (card) => `
+        <article class="stat-card">
+          <span class="stat-value">${card.value}</span>
+          <span class="stat-label">${card.label}</span>
         </article>
       `,
     )
     .join("");
 }
 
-function populateFilters() {
-  populateSelect(elements.roleFilter, uniqueValues(state.jobs.map((job) => job.roleFamily)));
-  populateSelect(elements.modeFilter, uniqueValues(state.jobs.map((job) => job.workMode)));
-  populateSelect(elements.skillFilter, uniqueValues(state.jobs.flatMap((job) => job.skillTags)));
-}
-
-function populateSelect(select, options) {
-  select.innerHTML = ["<option value=\"\">All</option>"]
-    .concat(options.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
+function renderAnalysisChips() {
+  elements.analysisChips.innerHTML = analysisFilters
+    .map((analysisType) => {
+      const isActive = analysisType === state.analysisFilter;
+      return `
+        <button
+          type="button"
+          class="chip ${isActive ? "is-active" : ""}"
+          data-analysis-filter="${escapeHtml(analysisType)}"
+        >
+          ${escapeHtml(analysisType)}
+        </button>
+      `;
+    })
     .join("");
 }
 
-function renderJobs() {
-  const filteredJobs = getFilteredJobs();
-  elements.jobsMeta.textContent = `${filteredJobs.length} of ${state.jobs.length} live roles shown`;
-
-  if (!filteredJobs.length) {
-    elements.jobGrid.innerHTML = createEmptyState("No roles match the current filters", "Broaden the search term or clear one of the filters.");
+function renderFigureGrid(filteredFigures) {
+  if (!filteredFigures.length) {
+    elements.figureGrid.innerHTML = `
+      <div class="empty-state">
+        <h3>No figures match this filter.</h3>
+        <p>Try a broader search term or switch back to a wider analysis category.</p>
+      </div>
+    `;
     return;
   }
 
-  elements.jobGrid.innerHTML = filteredJobs
-    .map((job) => `
-      <article class="job-card">
-        <div class="job-head">
-          <div class="job-topline">
-            <div>
-              <h3 class="job-title">${escapeHtml(job.title)}</h3>
-              <p class="job-company">${escapeHtml(job.company)}</p>
-            </div>
-            <span class="mode-pill">${escapeHtml(job.workMode)}</span>
+  elements.figureGrid.innerHTML = filteredFigures
+    .map((figure, index) => {
+      const isSelected = figure.id === state.selectedId;
+      return `
+        <article
+          class="figure-card ${isSelected ? "is-selected" : ""}"
+          data-figure-id="${escapeHtml(figure.id)}"
+          tabindex="0"
+          style="--accent:${figure.accent}; --entry-delay:${index * 60}ms;"
+        >
+          <div class="card-topline">
+            <span class="eyebrow">${escapeHtml(figure.analysisType)}</span>
+            <span class="domain-pill">${escapeHtml(figure.omicsDomain)}</span>
           </div>
-          <div class="inline-meta">
-            <span>${escapeHtml(job.roleFamily)}</span>
-            <span>${escapeHtml(job.focusArea)}</span>
-            <span>${escapeHtml(job.location)}</span>
+          <h3>${escapeHtml(figure.title)}</h3>
+          <p>${escapeHtml(figure.summary)}</p>
+          <div class="tag-row">
+            ${figure.tags
+              .map((tag) => `<span class="tag-pill">${escapeHtml(tag)}</span>`)
+              .join("")}
           </div>
-        </div>
-
-        <div class="list-block">
-          <strong>Responsibilities</strong>
-          <ul>
-            ${job.responsibilities.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-          </ul>
-        </div>
-
-        <div class="list-block">
-          <strong>Requirements</strong>
-          <ul>
-            ${job.requirements.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-          </ul>
-        </div>
-
-        <div class="list-block">
-          <strong>Skill tags</strong>
-          <div class="job-tags">
-            ${job.skillTags.map((tag) => `<span class="skill-pill">${escapeHtml(tag)}</span>`).join("")}
+          <div class="card-footer">
+            <span>${escapeHtml(figure.figureType)}</span>
+            <span>${escapeHtml(figure.datasetLabel)}</span>
           </div>
-        </div>
-
-        <div class="job-footer">
-          <span>${escapeHtml(job.company)} source</span>
-          <a class="resource-link" href="${escapeHtml(job.sourceUrl)}" target="_blank" rel="noreferrer">Open source</a>
-        </div>
-      </article>
-    `)
+        </article>
+      `;
+    })
     .join("");
 }
 
-function getFilteredJobs() {
-  return state.jobs.filter((job) => {
-    const haystack = [
-      job.company,
-      job.title,
-      job.roleFamily,
-      job.focusArea,
-      job.location,
-      ...job.skillTags,
-      ...job.responsibilities,
-      ...job.requirements,
-    ]
-      .join(" ")
-      .toLowerCase();
+function renderInspector() {
+  const selectedFigure = figureCatalog.find((figure) => figure.id === state.selectedId);
 
-    return (!state.searchTerm || haystack.includes(state.searchTerm))
-      && (!state.roleFilter || job.roleFamily === state.roleFilter)
-      && (!state.modeFilter || job.workMode === state.modeFilter)
-      && (!state.skillFilter || job.skillTags.includes(state.skillFilter));
-  });
+  if (!selectedFigure) {
+    elements.inspector.innerHTML = `
+      <div class="status-surface">
+        <h3>Select a figure</h3>
+        <p>Choose a card on the left to render its plot, inspect the code, and preview the attached test dataset.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const datasetUrl = resolveAsset(selectedFigure.datasetPath);
+  const codeUrl = resolveAsset(selectedFigure.codePath ?? selectedFigure.rendererPath);
+
+  elements.inspector.innerHTML = `
+    <article class="inspector-shell" style="--accent:${selectedFigure.accent};">
+      <header class="inspector-header">
+        <div class="inspector-topline">
+          <span class="eyebrow">${escapeHtml(selectedFigure.analysisType)}</span>
+          <span class="domain-pill">${escapeHtml(selectedFigure.omicsDomain)}</span>
+        </div>
+        <h3>${escapeHtml(selectedFigure.title)}</h3>
+        <p class="inspector-summary">${escapeHtml(selectedFigure.narrative)}</p>
+        <p class="inspector-caption">${escapeHtml(selectedFigure.caption)}</p>
+        <div class="resource-row">
+          <a class="resource-link" href="${datasetUrl}" download>Download dataset</a>
+          <a class="resource-link" href="${codeUrl}" download>Download code</a>
+        </div>
+      </header>
+
+      <section class="inspector-section">
+        <div class="section-header">
+          <h4>Live figure</h4>
+          <span class="section-meta">${escapeHtml(selectedFigure.figureType)}</span>
+        </div>
+        <div id="plotMount" class="plot-stage">
+          <div class="status-surface compact">
+            <div class="loading-dot"></div>
+            <p>Rendering figure from attached demo data...</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="inspector-section">
+        <div class="section-header">
+          <h4>Figure notes</h4>
+          <span class="section-meta">${escapeHtml(selectedFigure.datasetLabel)}</span>
+        </div>
+        <div class="note-grid">
+          ${selectedFigure.notes
+            .map((note) => `<div class="note-card">${escapeHtml(note)}</div>`)
+            .join("")}
+        </div>
+      </section>
+
+      <section class="inspector-section">
+        <div class="section-header">
+          <h4>Source code</h4>
+          <span class="section-meta">${escapeHtml(selectedFigure.codeLanguage)}</span>
+        </div>
+        <pre class="code-block"><code id="codeViewer">Loading source...</code></pre>
+      </section>
+
+      <section class="inspector-section">
+        <div class="section-header">
+          <h4>Dataset preview</h4>
+          <span class="section-meta">Attached demo input</span>
+        </div>
+        <div id="datasetPreview" class="dataset-preview">
+          <div class="status-surface compact">
+            <div class="loading-dot"></div>
+            <p>Inspecting dataset structure...</p>
+          </div>
+        </div>
+      </section>
+    </article>
+  `;
+
+  hydrateInspector(selectedFigure);
 }
 
-function uniqueValues(values) {
-  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
-}
+async function hydrateInspector(figure) {
+  const loadId = ++inspectorLoadId;
+  const plotMount = elements.inspector.querySelector("#plotMount");
+  const codeViewer = elements.inspector.querySelector("#codeViewer");
+  const datasetPreview = elements.inspector.querySelector("#datasetPreview");
 
-function createEmptyState(title, message) {
-  return `
-    <div class="empty-state">
-      <div>
-        <h3>${escapeHtml(title)}</h3>
+  try {
+    const [dataset, rendererModule, codeText] = await Promise.all([
+      loadDataset(figure.datasetPath),
+      import(resolveAsset(figure.rendererPath)),
+      fetchText(figure.codePath ?? figure.rendererPath),
+    ]);
+
+    if (loadId !== inspectorLoadId) {
+      return;
+    }
+
+    if (!window.Plotly) {
+      throw new Error("Plotly did not load.");
+    }
+
+    await rendererModule.renderFigure(plotMount, dataset, {
+      Plotly: window.Plotly,
+      figure,
+    });
+
+    if (loadId !== inspectorLoadId) {
+      return;
+    }
+
+    codeViewer.textContent = codeText;
+    datasetPreview.innerHTML = createDatasetPreview(dataset);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+
+    plotMount.innerHTML = `
+      <div class="status-surface error">
+        <h4>Could not render this figure</h4>
         <p>${escapeHtml(message)}</p>
       </div>
+    `;
+
+    codeViewer.textContent = `Failed to load source code.\n\n${message}`;
+    datasetPreview.innerHTML = `
+      <div class="status-surface error">
+        <h4>Dataset preview unavailable</h4>
+        <p>${escapeHtml(message)}</p>
+      </div>
+    `;
+  }
+}
+
+async function loadDataset(relativePath) {
+  const response = await fetch(resolveAsset(relativePath));
+  if (!response.ok) {
+    throw new Error(`Failed to load dataset: ${response.status}`);
+  }
+
+  const extension = relativePath.split(".").pop()?.toLowerCase();
+
+  if (extension === "json") {
+    return response.json();
+  }
+
+  const rawText = await response.text();
+
+  if (extension === "csv" || extension === "tsv") {
+    if (!window.Papa) {
+      throw new Error("PapaParse did not load.");
+    }
+
+    const parsed = window.Papa.parse(rawText, {
+      delimiter: extension === "tsv" ? "\t" : ",",
+      dynamicTyping: true,
+      header: true,
+      skipEmptyLines: true,
+    });
+
+    if (parsed.errors.length) {
+      throw new Error(parsed.errors[0].message);
+    }
+
+    return parsed.data;
+  }
+
+  return rawText;
+}
+
+async function fetchText(relativePath) {
+  const response = await fetch(resolveAsset(relativePath));
+  if (!response.ok) {
+    throw new Error(`Failed to load source code: ${response.status}`);
+  }
+
+  return response.text();
+}
+
+function resolveAsset(relativePath) {
+  return new URL(relativePath, import.meta.url).href;
+}
+
+function createDatasetPreview(dataset) {
+  if (Array.isArray(dataset) && dataset.length && typeof dataset[0] === "object") {
+    return renderTabularPreview(dataset);
+  }
+
+  if (isMatrixDataset(dataset)) {
+    return renderMatrixPreview(dataset);
+  }
+
+  return `
+    <div class="status-surface compact">
+      <p>This dataset format is valid, but the previewer does not have a tailored table for it yet.</p>
     </div>
   `;
 }
 
-function formatDate(rawDate) {
-  const [year, month, day] = String(rawDate).split("-").map(Number);
-  if (!year || !month || !day) {
-    return String(rawDate);
-  }
+function renderTabularPreview(rows) {
+  const columns = Object.keys(rows[0] ?? {}).slice(0, 6);
+  const visibleRows = rows.slice(0, 6);
 
-  return new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(year, month - 1, day));
+  return `
+    <div class="dataset-meta-row">
+      <span class="dataset-pill">${rows.length} rows</span>
+      <span class="dataset-pill">${columns.length} columns shown</span>
+    </div>
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${visibleRows
+            .map(
+              (row) => `
+                <tr>
+                  ${columns
+                    .map((column) => `<td>${escapeHtml(formatCell(row[column]))}</td>`)
+                    .join("")}
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
-function shortDate(rawDate) {
-  const [year, month, day] = String(rawDate).split("-").map(Number);
-  if (!year || !month || !day) {
-    return String(rawDate);
-  }
+function renderMatrixPreview(dataset) {
+  const sampleSlice = dataset.samples.slice(0, 4);
+  const featureSlice = dataset.features.slice(0, 4);
 
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-  }).format(new Date(year, month - 1, day));
+  return `
+    <div class="dataset-meta-row">
+      <span class="dataset-pill">${dataset.features.length} features</span>
+      <span class="dataset-pill">${dataset.samples.length} samples</span>
+      <span class="dataset-pill">${dataset.values.length} matrix rows</span>
+    </div>
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            ${sampleSlice.map((sample) => `<th>${escapeHtml(sample)}</th>`).join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${featureSlice
+            .map((feature, rowIndex) => {
+              const cells = sampleSlice
+                .map((sample, columnIndex) => {
+                  const value = dataset.values[rowIndex]?.[columnIndex];
+                  return `<td>${escapeHtml(formatCell(value))}</td>`;
+                })
+                .join("");
+              return `<tr><th>${escapeHtml(feature)}</th>${cells}</tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
-function formatDelta(value) {
-  if (value > 0) {
-    return `+${value}`;
+function isMatrixDataset(dataset) {
+  return (
+    Boolean(dataset) &&
+    !Array.isArray(dataset) &&
+    Array.isArray(dataset.features) &&
+    Array.isArray(dataset.samples) &&
+    Array.isArray(dataset.values)
+  );
+}
+
+function renderAuthoringGuide() {
+  const steps = [
+    {
+      title: "1. Add a small test dataset",
+      detail:
+        "Place a CSV, TSV, or JSON file in content/datasets so each figure can be regenerated quickly on GitHub Pages.",
+      path: "content/datasets/",
+    },
+    {
+      title: "2. Add a browser renderer",
+      detail:
+        "Create a module in content/renderers that exports renderFigure(container, dataset, context).",
+      path: "content/renderers/",
+    },
+    {
+      title: "3. Register the figure",
+      detail:
+        "Add one metadata object in assets/figures.js to link the card, live preview, dataset, and displayed source code.",
+      path: "assets/figures.js",
+    },
+  ];
+
+  elements.authoringGuide.innerHTML = steps
+    .map(
+      (step) => `
+        <article class="authoring-card">
+          <h3>${escapeHtml(step.title)}</h3>
+          <p>${escapeHtml(step.detail)}</p>
+          <code>${escapeHtml(step.path)}</code>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function getFilteredFigures() {
+  return figureCatalog.filter((figure) => {
+    const matchesAnalysis =
+      state.analysisFilter === "All analyses" ||
+      figure.analysisType === state.analysisFilter;
+
+    const searchCorpus = [
+      figure.title,
+      figure.summary,
+      figure.analysisType,
+      figure.omicsDomain,
+      figure.figureType,
+      ...figure.tags,
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    const matchesSearch =
+      !state.searchTerm || searchCorpus.includes(state.searchTerm);
+
+    return matchesAnalysis && matchesSearch;
+  });
+}
+
+function ensureSelection(filteredFigures) {
+  if (!filteredFigures.length) {
+    state.selectedId = null;
+    return;
   }
+
+  const stillVisible = filteredFigures.some((figure) => figure.id === state.selectedId);
+  if (!stillVisible) {
+    state.selectedId = filteredFigures[0].id;
+  }
+}
+
+function formatCell(value) {
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? String(value) : value.toFixed(3);
+  }
+
+  if (value === null || value === undefined || value === "") {
+    return "NA";
+  }
+
   return String(value);
-}
-
-function humanizeMetric(metricKey) {
-  return metricKey.replaceAll("_", " ");
 }
 
 function escapeHtml(value) {
