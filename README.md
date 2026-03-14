@@ -1,14 +1,31 @@
-# Omics Figure Atlas
+﻿# Bioinformatics Hiring Trend Index
 
-This repository contains a static GitHub Pages-ready showcase for bioinformatics figures. Each card is backed by:
+This folder contains the static site for the live bioinformatics jobs dashboard published at GitHub Pages. The page reads the generated files in `output/` and renders:
 
-- a metadata entry in `assets/figures.js`
-- a small demo dataset in `content/datasets/`
-- a browser-side renderer in `content/renderers/`
+- the current skill trend index
+- weekly history from `bioinformatics-trend-history.csv`
+- role-family and work-mode mix
+- a filterable live jobs board
+
+## Data files
+- `output/bioinformatics-jobs-board.csv`: current live-role snapshot
+- `output/bioinformatics-jobs-board.md`: markdown board export
+- `output/bioinformatics-skill-trends.md`: narrative summary
+- `output/bioinformatics-trend-history.csv`: weekly history for the dashboard chart
+
+## CI refresh
+Two workflows are included:
+
+- `.github/workflows/deploy-pages.yml`: deploys the site on normal pushes to `main`
+- `.github/workflows/refresh-data.yml`: runs every Monday at 14:00 UTC and can also be triggered manually
+
+The scheduled refresh workflow runs `automation/refresh_jobs.py`, updates `output/`, commits the refreshed files back to `main`, and deploys Pages from the same workflow run.
+
+## Source coverage
+The CI refresh currently uses public job-board APIs from Greenhouse and Lever plus a small direct official-page fallback set for sources without a stable public API. That means the dashboard is automatically refreshed each week from tracked sources, but non-API boards may still require occasional source maintenance.
 
 ## Local preview
-
-Serve the folder over HTTP so module imports and `fetch()` calls work:
+Serve the folder over HTTP so the browser can fetch the CSV files:
 
 ```powershell
 cd E:\workdir\bioinformatics-board
@@ -16,19 +33,3 @@ python -m http.server 4173
 ```
 
 Then open `http://127.0.0.1:4173/`.
-
-## Add your own figure
-
-1. Put a small test dataset in `content/datasets/`.
-2. Create a renderer module in `content/renderers/` that exports:
-
-   ```javascript
-   export async function renderFigure(container, dataset, context) {
-     const { Plotly } = context;
-     await Plotly.newPlot(container, [/* traces */], {/* layout */}, { responsive: true });
-   }
-   ```
-
-3. Register the figure in `assets/figures.js`.
-
-If your original analysis code is in R or Python, keep a lightweight browser renderer for the public demo and point `codePath` to the original `.R` or `.py` file if you want to display that source instead.

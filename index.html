@@ -1,81 +1,120 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Interactive bioinformatics figure showcase with live plot rendering, attached code, and downloadable test datasets."
+      content="Weekly bioinformatics hiring dashboard with skill trend index, history, and a live jobs board."
     />
-    <meta name="theme-color" content="#f5efe3" />
-    <title>Omics Figure Atlas</title>
+    <meta name="theme-color" content="#f2ede3" />
+    <title>Bioinformatics Hiring Trend Index</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;700;800&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./assets/app.css" />
   </head>
   <body>
-    <div class="background-orb orb-a"></div>
-    <div class="background-orb orb-b"></div>
+    <div class="background-arc arc-a"></div>
+    <div class="background-arc arc-b"></div>
     <div class="background-grid"></div>
 
     <div class="page-shell">
       <header class="hero">
-        <div id="heroText" class="hero-copy"></div>
+        <div id="heroCopy" class="hero-copy"></div>
         <div id="heroStats" class="hero-stats"></div>
       </header>
 
-      <main class="workspace">
-        <section class="gallery-panel" aria-labelledby="galleryHeading">
+      <main class="dashboard-grid">
+        <section class="panel trend-panel" aria-labelledby="trendHeading">
           <div class="panel-heading">
             <div>
-              <p class="section-kicker">Figure Library</p>
-              <h2 id="galleryHeading">Browse by analysis type</h2>
+              <p class="section-kicker">Trend Index</p>
+              <h2 id="trendHeading">Current skill demand</h2>
             </div>
+            <p id="trendMeta" class="panel-note"></p>
+          </div>
+          <div id="skillIndex" class="skill-index"></div>
+        </section>
 
-            <label class="search-field" for="searchInput">
+        <section class="panel history-panel" aria-labelledby="historyHeading">
+          <div class="panel-heading">
+            <div>
+              <p class="section-kicker">Weekly History</p>
+              <h2 id="historyHeading">Longitudinal signals</h2>
+            </div>
+            <label class="inline-select" for="historyMetric">
+              <span>Metric</span>
+              <select id="historyMetric"></select>
+            </label>
+          </div>
+          <div id="historyChart" class="history-chart"></div>
+          <div id="historySummary" class="history-summary"></div>
+        </section>
+
+        <section class="panel mix-panel" aria-labelledby="mixHeading">
+          <div class="panel-heading">
+            <div>
+              <p class="section-kicker">Market Shape</p>
+              <h2 id="mixHeading">Role and work-mode mix</h2>
+            </div>
+            <p class="panel-note">Derived from the current live-role snapshot.</p>
+          </div>
+
+          <div class="mix-grid">
+            <section>
+              <h3>Role families</h3>
+              <div id="roleMix" class="bar-stack"></div>
+            </section>
+
+            <section>
+              <h3>Work modes</h3>
+              <div id="modeMix" class="bar-stack"></div>
+            </section>
+
+            <section>
+              <h3>Observed signals</h3>
+              <div id="insightCards" class="insight-grid"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel jobs-panel" aria-labelledby="jobsHeading">
+          <div class="panel-heading">
+            <div>
+              <p class="section-kicker">Live Board</p>
+              <h2 id="jobsHeading">Current roles</h2>
+            </div>
+            <p id="jobsMeta" class="panel-note"></p>
+          </div>
+
+          <div class="control-grid">
+            <label class="control-field" for="searchInput">
               <span>Search</span>
-              <input
-                id="searchInput"
-                type="search"
-                placeholder="Search figures, omics domain, or tags"
-                autocomplete="off"
-              />
+              <input id="searchInput" type="search" placeholder="Company, title, focus area, or skill" autocomplete="off" />
+            </label>
+            <label class="control-field" for="roleFilter">
+              <span>Role family</span>
+              <select id="roleFilter"></select>
+            </label>
+            <label class="control-field" for="modeFilter">
+              <span>Work mode</span>
+              <select id="modeFilter"></select>
+            </label>
+            <label class="control-field" for="skillFilter">
+              <span>Skill tag</span>
+              <select id="skillFilter"></select>
             </label>
           </div>
 
-          <div id="analysisChips" class="chip-row" aria-label="Analysis filters"></div>
-          <div id="figureGrid" class="figure-grid" aria-live="polite"></div>
+          <div id="jobGrid" class="job-grid"></div>
         </section>
-
-        <aside class="inspector-panel" aria-labelledby="inspectorHeading">
-          <div class="panel-heading inspector-heading">
-            <div>
-              <p class="section-kicker">Selected Figure</p>
-              <h2 id="inspectorHeading">Live preview</h2>
-            </div>
-          </div>
-
-          <div id="inspector" class="inspector-body"></div>
-        </aside>
       </main>
-
-      <section class="authoring-panel" aria-labelledby="authoringHeading">
-        <div class="panel-heading">
-          <div>
-            <p class="section-kicker">Authoring Workflow</p>
-            <h2 id="authoringHeading">Keep each figure self-contained</h2>
-          </div>
-        </div>
-
-        <div id="authoringGuide" class="authoring-grid"></div>
-      </section>
     </div>
 
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
     <script type="module" src="./assets/app.js"></script>
   </body>
